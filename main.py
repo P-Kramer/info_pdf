@@ -1,53 +1,144 @@
-import streamlit as st
 import fitz  # PyMuPDF
 import pandas as pd
+import re
+from openpyxl.styles import Font, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
 
-# Substitua pelo caminho do seu PDF local
-pdf_path = "C:\\Users\\Pedro Averame\\Documents\\STATEMENT_TEST.pdf"
-
-
-# Lista para armazenar os resultados
+# Caminho do PDF
+pdf_path = "C:/Users/Pedro Averame/Documents/STATEMENT_TEST.pdf"
 dados = []
 
-# Função auxiliar para extrair dados de cada página
-def extrair_dados(texto_pagina):
-    linhas = texto_pagina.split('\n')
-    ativo = None
+# Função para verificar se o span está em negrito
+def is_bold(span):
+    return "Bold" in span.get("font", "")
 
-    for i, linha in enumerate(linhas):
-        # Detecta nome do ativo
-        if "Next Dividend Payable" in linha and "Asset Class" in linha:
-            proxima = linhas[i + 1] if i + 1 < len(linhas) else ""
-            if "(" in proxima and ")" in proxima:
-                ativo = proxima.strip()
-        # Detecta linha de total
-        if linha.strip().startswith("Total"):
-            partes = linha.strip().split()
-            try:
-                quantidade_total = float(partes[1].replace(',', ''))
-                total_cost = float(partes[2].replace(',', ''))
-                market_value = float(partes[3].replace(',', ''))
+ativo_atual = None
+total_extraido = False
+linhas_ativas = []
 
-                if ativo:
-                    ticker = ativo.split('(')[-1].strip(')')
-                    dados.append({
-                        "Ativo": ativo,
-                        "Ticker": ticker,
-                        "Quantidade Total": quantidade_total,
-                        "Total Cost": total_cost,
-                        "Market Value": market_value
-                    })
-            except:
+with fitz.open(pdf_path) as doc:
+    for i, page in enumerate(doc):
+        spans = []
+        blocks = page.get_text("dict")["blocks"]
+        for block in blocks:
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    spans.append(span)
+
+        idx = 0
+        while idx < len(spans):
+            span = spans[idx]
+            texto = span["text"].strip()
+
+            # Detecta novo ativo válido
+            if is_bold(span) and "(" in texto and ")" in texto:
+                if any(palavra in texto for palavra in ["$", "/", "(MMF)", "(NL)", ",", "Approved List", "Focus List", "Investment Objectives", "Asset Class"]):
+                    idx += 1
+                    continue
+
+                # Se havia ativo anterior sem total, tenta pegar última linha válida com números
+                if ativo_atual and not total_extraido and linhas_ativas:
+                    c= 0
+                    for linha in (linhas_ativas):
+                        textos = [span.get("text", "").strip() for span in linha if "text" in span]
+
+                        while c == 0:
+                            infos = textos
+                            c+=1
+                            try:
+                                
+                                quantidade = float(infos[1].replace(",", ""))
+                                total_cost = float(infos[4].replace(",", ""))
+                                market_value = float(infos[5].replace(",", ""))
+                                tickers = re.findall(r"\(([^)]+)\)", ativo_atual)
+                                ticker = tickers[-1].strip() if tickers else ""
+
+                                dados.append({
+                                    "Página": i + 1,
+                                    "Ativo": ativo_atual,
+                                    "Ticker": ticker,
+                                    "Quantidade Total": quantidade,
+                                    "Total Cost": total_cost,
+                                    "Market Value": market_value
+                                })
+                                break
+                            except Exception as e:
+                                print(f"Erro na extração alternativa de {ativo_atual}: {e}")
+
+                # Atualiza o novo ativo
+                ativo_atual = texto
+                total_extraido = False
+                linhas_ativas = []
+                idx += 1
                 continue
 
-# Abrir o PDF
-with fitz.open(pdf_path) as doc:
-    for pagina in doc:
-        texto = pagina.get_text()
-        extrair_dados(texto)
+            # Coleta linha se parecer conter números
+            if ativo_atual and re.search(r"\d", texto):
+                linha_nova = spans[idx:idx+6]
+                linhas_ativas.append(linha_nova)
 
-# Converter em DataFrame e salvar como Excel
+            # Detecta linha de "Total"
+            if ativo_atual and texto.startswith("Total"):
+                texto_total = ' '.join([sp["text"] for sp in spans[idx:idx+6]])
+                numeros = re.findall(r"[-]?[\d,.]+", texto_total)
+                if len(numeros) >= 3:
+                    try:
+                        quantidade = float(numeros[0].replace(",", ""))
+                        total_cost = float(numeros[1].replace(",", ""))
+                        market_value = float(numeros[2].replace(",", ""))
+                        tickers = re.findall(r"\(([^)]+)\)", ativo_atual)
+                        ticker = tickers[-1].strip() if tickers else ""
+
+                        dados.append({
+                            "Página": i + 1,
+                            "Ativo": ativo_atual,
+                            "Ticker": ticker,
+                            "Quantidade Total": quantidade,
+                            "Total Cost": total_cost,
+                            "Market Value": market_value
+                        })
+
+                        total_extraido = True
+                        ativo_atual = None
+                        linhas_ativas = []
+
+                    except Exception as e:
+                        print(f"Erro ao processar '{ativo_atual}': {e}")
+            idx += 1
+
+# Cria e exporta o DataFrame
 df = pd.DataFrame(dados)
-df.to_excel("ativos_extraidos.xlsx", index=False)
+excel_path = "ativos_extraidos_corrigido_final.xlsx"
+with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+    df.to_excel(writer, index=False, sheet_name="Ativos")
+    workbook = writer.book
+    worksheet = writer.sheets["Ativos"]
 
-print("Extração concluída. Arquivo salvo como 'ativos_extraidos.xlsx'")
+    border = Border(left=Side(style='thin', color='000000'),
+                    right=Side(style='thin', color='000000'),
+                    top=Side(style='thin', color='000000'),
+                    bottom=Side(style='thin', color='000000'))
+
+    header_font = Font(bold=True, color="000000")
+    header_fill = PatternFill("solid", fgColor="FF3D98FF")  # FF = opaco
+
+
+    for row in worksheet.iter_rows():
+        for cell in row:
+            cell.border = border
+            if cell.row == 1:
+                cell.font = header_font
+                cell.fill = header_fill
+
+    for col in worksheet.columns:
+        max_length = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        worksheet.column_dimensions[col_letter].width = max_length + 2
+
+print(f"✅ Extração e formatação concluídas. Arquivo gerado: {excel_path}")

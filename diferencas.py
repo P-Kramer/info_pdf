@@ -21,7 +21,7 @@ pareamentos_forcados = {
 def processar_com_dinheiro(df):
     df = df[
         (df['Carteira'].str.startswith('LA_', na=False)) &
-        (df['Classe'].isin(['EQUITY', 'ALTERNATIVES', "FIXED INCOME","FLOATING INCOME"]))
+        (df['Classe'].isin(['EQUITY', "FIXED INCOME","FLOATING INCOME"]))
     ].copy()
     df = df.rename(columns={
         'Ativo': 'Ticker',

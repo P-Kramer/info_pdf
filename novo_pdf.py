@@ -1,15 +1,14 @@
+
 import fitz  # PyMuPDF
 import pandas as pd
 import re
 from openpyxl.styles import Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-# Caminho do PDF
 pdf_path = "C:/Users/Pedro Averame/Documents/STATEMENT_TEST.pdf"
 dados = []
 ativos_sem_total = []
 
-# Função para verificar se o span está em negrito
 def is_bold(span):
     return "Bold" in span.get("font", "")
 
@@ -89,43 +88,37 @@ with fitz.open(pdf_path) as doc:
                                     "Market Value": market_value
                                 })
                                 break
-            # Detecta novo ativo válido
+
+
             if is_bold(span) and "(" in texto and ")" in texto:
                 if any(palavra in texto for palavra in ["$", "/", "(MMF)", "(NL)", ",", "Approved List", "Focus List", "Investment Objectives", "Asset Class"]):
                     idx += 1
                     continue
 
-                # Se havia ativo anterior sem total, tenta pegar última linha válida com números
                 if ativo_atual and not total_extraido and linhas_ativas:
-                    c= 0
-                    for linha in (linhas_ativas):
-                        textos = [span.get("text", "").strip() for span in linha if "text" in span]
+                    try:
+                        last_line = ' '.join([sp.get("text", "") for sp in linhas_ativas[-1]])
+                        numeros = re.findall(r"[-]?[\d,.]+", last_line)
+                        if len(numeros) >= 3:
+                            quantidade = float(numeros[0].replace(",", ""))
+                            total_cost = float(numeros[1].replace(",", ""))
+                            market_value = float(numeros[2].replace(",", ""))
+                            tickers = re.findall(r"\(([^)]+)\)", ativo_atual)
+                            ticker = tickers[-1].strip() if tickers else ""
+                            dados.append({
+                                "Página": i + 1,
+                                "Ativo": ativo_atual,
+                                "Ticker": ticker,
+                                "CUSIP": cusip if cusip else "",
+                                "Quantidade Total": quantidade,
+                                "Total Cost": total_cost,
+                                "Market Value": market_value
+                            })
+                            ativos_sem_total = [a for a in ativos_sem_total if a["CUSIP"] != cusip]
+                            cusip = None
+                    except Exception as e:
+                        print(f"Erro na extração alternativa de {ativo_atual}: {e}")
 
-                        while c == 0:
-                            infos = textos
-                            c+=1
-                            try:
-                                
-                                quantidade = float(infos[1].replace(",", ""))
-                                total_cost = float(infos[4].replace(",", ""))
-                                market_value = float(infos[5].replace(",", ""))
-                                tickers = re.findall(r"\(([^)]+)\)", ativo_atual)
-                                ticker = tickers[-1].strip() if tickers else ""
-
-                                dados.append({
-                                    "Página": i + 1,
-                                    "Ativo": ativo_atual,
-                                    "Ticker": ticker,
-                                    "CUSIP": cusip if cusip else "",
-                                    "Quantidade Total": total_cost if cusip else quantidade,
-                                    "Total Cost": "" if cusip else total_cost,
-                                    "Market Value": market_value
-                                })
-                                break
-                            except Exception as e:
-                                print(f"Erro na extração alternativa de {ativo_atual}: {e}")
-
-                # Atualiza o novo ativo
                 ativo_atual = texto
                 total_extraido = False
                 linhas_ativas = []
@@ -182,8 +175,8 @@ for ativo in ativos_sem_total:
         "Ativo": ativo["Ativo"],
         "Ticker": "",
         "CUSIP": ativo["CUSIP"],
-        "Quantidade Total": ativo["Face Value"],
-        "Total Cost": None,
+        "Quantidade Total": None,
+        "Total Cost": ativo["Face Value"],
         "Market Value": ativo["Market Value"]
     })
 

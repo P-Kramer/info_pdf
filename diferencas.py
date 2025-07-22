@@ -7,7 +7,7 @@ from openpyxl.styles import PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Configurações
-RED_FILL = PatternFill(start_color='FFFFF000', end_color='FFFFF000', fill_type='solid')
+YELLOW_FILL = PatternFill(start_color='FFFFF000', end_color='FFFFF000', fill_type='solid')
 
 # Mapeamento manual de pareamentos forçados
 pareamentos_forcados = {
@@ -232,7 +232,7 @@ if not all_matches.empty:
         diff_value = ws_pareados.cell(row=idx, column=diff_market_value_col).value
         if diff_value is not None and abs(diff_value) > 1:
             for cell in row:
-                cell.fill = RED_FILL
+                cell.fill = YELLOW_FILL
 
 wb.save("relatorio_consolidado_equity.xlsx")
 print("Relatório gerado com sucesso.")

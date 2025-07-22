@@ -143,7 +143,10 @@ with fitz.open(pdf_path) as doc:
                     try:
                         quantidade = float(numeros[0].replace(",", ""))
                         total_cost = float(numeros[1].replace(",", ""))
-                        market_value = float(numeros[2].replace(",", ""))
+                        if cusip:
+                            market_value = float(numeros[3].replace(",", ""))
+                        else:
+                            market_value = float(numeros[2].replace(",", ""))
                         tickers = re.findall(r"\(([^)]+)\)", ativo_atual)
                         ticker = tickers[-1].strip() if tickers else ""
                         if ativo_atual == "AMUNDI PIO US EQ FNDM GW I2(C) (PONVS)":
@@ -156,14 +159,14 @@ with fitz.open(pdf_path) as doc:
                                 "Total Cost": total_cost,
                                 "Market Value": market_value
                             })
-                        else:              
+                        else:             
                             dados.append({
                                 "Página": i + 1,
                                 "Ativo": ativo_atual if ativo_atual else "Desconhecido",
                                 "Ticker": ticker,
                                 "CUSIP": cusip if cusip else "",
                                 "Quantidade Total": quantidade,
-                                "Total Cost": "" if cusip else total_cost,
+                                "Total Cost": None if cusip else total_cost,
                                 "Market Value": market_value
                             })
                         ativos_sem_total = [a for a in ativos_sem_total if a["CUSIP"] != cusip]

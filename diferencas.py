@@ -1,12 +1,12 @@
-
 import pandas as pd
 import numpy as np
 from rapidfuzz import fuzz, process
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
+import re
 
-# Configurações
+# Configuração de cor
 YELLOW_FILL = PatternFill(start_color='FFFFF000', end_color='FFFFF000', fill_type='solid')
 
 # Mapeamento manual de pareamentos forçados
@@ -15,9 +15,19 @@ pareamentos_forcados = {
     "POLEN CAPITAL FOCUS US GR USD INSTL":"PFUGI",
     "JPM US SELECT EQUITY PLUS C (ACC) USD":"SELQZ",
     "AMUNDI FDS US EQ FUNDM GR I2 USD C":"PONVS",
-    "MS INVF GLOBAL ENDURANCE I USD ACC":"SMFVZ"
+    "MS INVF GLOBAL ENDURANCE I USD ACC":"SMFVZ",
+    "PRINCIPAL PREFERRED SECS N INC USD": "PRGPZ",
+    "PIMCO GIS INCOME H INSTL USD INC": "PCOAZ"
 }
 
+
+
+# Função para extrair CUSIP do texto
+def extrair_cusip(texto):
+    match = re.search(r'US([A-Z0-9]{9})', str(texto).upper())
+    return match.group(1) if match else None
+
+# Pré-processamento
 def processar_com_dinheiro(df):
     df = df[
         (df['Carteira'].str.startswith('LA_', na=False)) &
@@ -38,8 +48,9 @@ def processar_ativos(df):
         'Market Value': 'MarketValue'
     })
     df['TickerBase'] = df['Ticker'].str.extract(r'([A-Z]{2,6}$)')[0].fillna(df['Ticker'])
-    return df[['Nome', 'Ticker', 'TickerBase', 'Quantidade', 'MarketValue']]
+    return df[['Nome', 'Ticker', 'TickerBase', 'Quantidade', 'MarketValue','CUSIP']]
 
+# Leitura dos arquivos
 ativos_path = 'ativos_extraidos_corrigido_final.xlsx'
 cd_path = 'COMDINHEIRO.xlsx'
 df_cd = pd.read_excel(cd_path, sheet_name='COM DINHEIRO')
@@ -47,6 +58,85 @@ df_at = pd.read_excel(ativos_path, sheet_name='Ativos')
 
 equity_cd = processar_com_dinheiro(df_cd)
 equity_at = processar_ativos(df_at)
+
+# Mapeamento forçado: {CUSIP: Descrição}
+pareamentos_cusip_descricao_forcados = {
+    "J7596PAJ8": "SOFTBANK GROUP 17/UND. 6,875%",
+
+    # Adicione outros mapeamentos conforme necessário
+}
+
+# === PAREAMENTO FORÇADO POR CUSIP E DESCRIÇÃO ===
+forced_cusip_desc_matches = []
+
+# Percorrer os ATIVOS
+for _, row_at in equity_at.iterrows():
+    cusip_at = row_at['CUSIP']
+    
+    if pd.notna(cusip_at) and cusip_at in pareamentos_cusip_descricao_forcados:
+        descricao_alvo = pareamentos_cusip_descricao_forcados[cusip_at]
+        
+        # Buscar no COM DINHEIRO pela descrição alvo
+        match_cd = equity_cd[equity_cd['Descrição'].str.contains(descricao_alvo, case=False, na=False)]
+        
+        if not match_cd.empty:
+            row_cd = match_cd.iloc[0]
+            forced_cusip_desc_matches.append({
+                'Descrição_CD': row_cd['Descrição'],
+                'Ticker_CD': row_cd['Ticker'],
+                'TickerBase': row_cd['TickerBase'],
+                'Classe': row_cd["Classe"],
+                'Quantidade_CD': row_cd['Quantidade'],
+                'MarketValue_CD': row_cd['MarketValue'],
+                'Nome_MS': row_at['Nome'],
+                'Ticker_MS': row_at['Ticker'],
+                'Quantidade_MS': row_at['Quantidade'],
+                'CUSIP_MS': row_at['CUSIP'],
+                'MarketValue_MS': row_at['MarketValue'],
+                'Similaridade': 100
+            })
+            
+            # Remover os itens pareados
+            equity_cd = equity_cd.drop(row_cd.name)
+            equity_at = equity_at.drop(row_at.name)
+
+# Converter para DataFrame
+forced_cusip_desc_df = pd.DataFrame(forced_cusip_desc_matches)
+
+# === PAREAMENTO POR CUSIP ===
+equity_cd['CUSIP_EXTRAIDO'] = equity_cd['Ticker'].apply(extrair_cusip)
+
+cd_com_cusip = equity_cd.dropna(subset=['CUSIP_EXTRAIDO'])
+at_com_cusip = equity_at.dropna(subset=['CUSIP'])
+
+cd_sem_cusip = equity_cd[equity_cd['CUSIP_EXTRAIDO'].isna()]
+at_sem_cusip = equity_at[equity_at['CUSIP'].isna()]
+
+cusip_matches = []
+for _, row_cd in cd_com_cusip.iterrows():
+    for _, row_at in at_com_cusip.iterrows():
+        if row_at['CUSIP'] in row_cd['Ticker']:
+            cusip_matches.append({
+                'Descrição_CD': row_cd['Descrição'],
+                'Ticker_CD': row_cd['Ticker'],
+                'TickerBase': row_cd['TickerBase'],
+                'Classe': row_cd["Classe"],
+                'Quantidade_CD': row_cd['Quantidade'],
+                'MarketValue_CD': row_cd['MarketValue'],
+                'Nome_MS': row_at['Nome'],
+                'Ticker_MS': row_at['Ticker'],
+                'Quantidade_MS': row_at['Quantidade'],
+                'CUSIP_MS': row_at['CUSIP'],
+                'MarketValue_MS': row_at['MarketValue'],
+                'Similaridade': 100
+            })
+            break
+
+cusip_df = pd.DataFrame(cusip_matches)
+
+# Atualiza para seguir só com os SEM CUSIP
+equity_cd = cd_sem_cusip
+equity_at = at_sem_cusip
 
 # Matching exato
 exact_match = pd.merge(
@@ -56,6 +146,25 @@ exact_match = pd.merge(
     suffixes=('_CD', '_MS'),
     how='inner'
 )
+
+# Transformar em lista de dicionários no formato padrão
+exact_matches_list = []
+for index, row in exact_match.iterrows():
+    exact_matches_list.append({
+        'Descrição_CD': row['Descrição'],
+        'Ticker_CD': row['Ticker_CD'],
+        'TickerBase': row['TickerBase'],
+        'Classe': row['Classe'],
+        'Quantidade_CD': row['Quantidade_CD'],
+        'MarketValue_CD': row['MarketValue_CD'],
+        'Nome_MS': row['Nome'],
+        'Ticker_MS': row['Ticker_MS'],
+        'Quantidade_MS': row['Quantidade_MS'],
+        'CUSIP_MS': row['CUSIP'],
+        'MarketValue_MS': row['MarketValue_MS'],
+        'Similaridade': 100
+    })
+
 matched_tickers = exact_match['TickerBase'].unique()
 
 remaining_cd = equity_cd[~equity_cd['TickerBase'].isin(matched_tickers)]
@@ -74,17 +183,18 @@ for _, row in remaining_cd.iterrows():
                 'Descrição_CD': row['Descrição'],
                 'Ticker_CD': row['Ticker'],
                 'TickerBase': row['TickerBase'],
-                'Classe': row ["Classe"],
+                'Classe': row["Classe"],
                 'Quantidade_CD': row['Quantidade'],
                 'MarketValue_CD': row['MarketValue'],
                 'Nome_MS': match_row['Nome'],
                 'Ticker_MS': match_row['Ticker'],
                 'Quantidade_MS': match_row['Quantidade'],
+                'CUSIP_MS': match_row ['CUSIP'],
                 'MarketValue_MS': match_row['MarketValue'],
                 'Similaridade': 100
             })
 
-# Fuzzy match por descrição completa
+# Fuzzy por descrição completa
 fuzzy_matches = []
 for _, row in remaining_cd.iterrows():
     match, score, _ = process.extractOne(
@@ -98,24 +208,27 @@ for _, row in remaining_cd.iterrows():
             'Descrição_CD': row['Descrição'],
             'Ticker_CD': row['Ticker'],
             'TickerBase': row['TickerBase'],
-            'Classe': row ["Classe"],
+            'Classe': row["Classe"],
             'Quantidade_CD': row['Quantidade'],
             'MarketValue_CD': row['MarketValue'],
             'Nome_MS': match_row['Nome'],
             'Ticker_MS': match_row['Ticker'],
             'Quantidade_MS': match_row['Quantidade'],
+            'CUSIP_MS': match_row ['CUSIP'],
             'MarketValue_MS': match_row['MarketValue'],
             'Similaridade': score
         })
 
-# Junta exato + forçado + fuzzy descrição
-fuzzy_df = pd.DataFrame(fuzzy_matches + forcados)
+# Junta todos os pareamentos
 all_matches = pd.concat([
-    exact_match.rename(columns={'TickerBase': 'TickerBase'}),
-    fuzzy_df
+    forced_cusip_desc_df,  # Pareamentos forçados por CUSIP e descrição
+    cusip_df,              # Pareamentos por CUSIP tradicional
+    pd.DataFrame(exact_matches_list),
+    pd.DataFrame(forcados + fuzzy_matches),
+    # ... outros pareamentos
 ], ignore_index=True)
 
-# === NOVA RODADA 1: Comparar Ticker (ATIVOS) com TickerBase (COM DINHEIRO) ===
+# Outras rodadas de matching
 matched_bases = all_matches['TickerBase'].unique()
 extra_cd = equity_cd[~equity_cd['TickerBase'].isin(matched_bases)]
 extra_at = equity_at[~equity_at['TickerBase'].isin(matched_bases)]
@@ -129,17 +242,17 @@ for _, row_cd in extra_cd.iterrows():
             'Descrição_CD': row_cd['Descrição'],
             'Ticker_CD': row_cd['Ticker'],
             'TickerBase': row_cd['TickerBase'],
-            'Classe': row ["Classe"],
+            'Classe': row_cd["Classe"],
             'Quantidade_CD': row_cd['Quantidade'],
             'MarketValue_CD': row_cd['MarketValue'],
             'Nome_MS': match_row['Nome'],
             'Ticker_MS': match_row['Ticker'],
             'Quantidade_MS': match_row['Quantidade'],
+            'CUSIP_MS': match_row ['CUSIP'],
             'MarketValue_MS': match_row['MarketValue'],
             'Similaridade': 100
         })
 
-# === NOVA RODADA 2: Comparar primeira palavra de Descrição e Nome (fuzzy) ===
 cd_restante = extra_cd[~extra_cd['TickerBase'].isin([m['TickerBase'] for m in ticker_matches])]
 at_restante = extra_at[~extra_at['TickerBase'].isin([m['TickerBase'] for m in ticker_matches])]
 
@@ -153,24 +266,24 @@ for _, row_cd in cd_restante.iterrows():
         if score >= 80:
             match_row = at_restante[at_restante['Nome'] == match].iloc[0]
             palavra_matches.append({
-                'Descrição_CD': row['Descrição'],
-                'Ticker_CD': row['Ticker'],
-                'TickerBase': row['TickerBase'],
-                'Classe': row ["Classe"],
-                'Quantidade_CD': row['Quantidade'],
-                'MarketValue_CD': row['MarketValue'],
+                'Descrição_CD': row_cd['Descrição'],
+                'Ticker_CD': row_cd['Ticker'],
+                'TickerBase': row_cd['TickerBase'],
+                'Classe': row_cd["Classe"],
+                'Quantidade_CD': row_cd['Quantidade'],
+                'MarketValue_CD': row_cd['MarketValue'],
                 'Nome_MS': match_row['Nome'],
                 'Ticker_MS': match_row['Ticker'],
                 'Quantidade_MS': match_row['Quantidade'],
+                'CUSIP_MS': match_row ['CUSIP'],
                 'MarketValue_MS': match_row['MarketValue'],
                 'Similaridade': score
             })
 
-# Junta tudo
 extra_df = pd.DataFrame(ticker_matches + palavra_matches)
 all_matches = pd.concat([all_matches, extra_df], ignore_index=True)
 
-# Cálculos
+# Cálculos de diferença
 if not all_matches.empty:
     all_matches['PrecoUnitario_CD'] = all_matches['MarketValue_CD'] / all_matches['Quantidade_CD']
     all_matches['PrecoUnitario_MS'] = all_matches['MarketValue_MS'] / all_matches['Quantidade_MS']
@@ -182,31 +295,26 @@ if not all_matches.empty:
     all_matches['Pct_Diff_PrecoUnitario'] = all_matches['Diff_PrecoUnitario'] / all_matches['PrecoUnitario_MS']
     all_matches['Destaque'] = np.abs(all_matches['Diff_PrecoUnitario']) > 1
 
-# Marcar os TickerBase usados nos pareamentos
 tickersbase_usados_cd = all_matches['TickerBase'].unique()
 tickers_usados_at = all_matches['Ticker_MS'].unique()
 
-# Agora removemos da COM DINHEIRO pelo TickerBase
 non_matched_cd = equity_cd[~equity_cd['TickerBase'].isin(tickersbase_usados_cd)]
-
-# E removemos da ATIVOS pelo Ticker (não pelo TickerBase!)
 non_matched_at = equity_at[~equity_at['Ticker'].isin(tickers_usados_at)]
-
 
 non_matched_consolidado = pd.concat([
     non_matched_cd.assign(Origem='COM DINHEIRO'),
     non_matched_at.assign(Origem='ATIVOS')
 ], ignore_index=True)
 
-# Reordenar colunas
-if not all_matches.empty:
-    col_order = [
-        'TickerBase', 'Ticker_MS', 'Ticker_CD', 'Descrição_CD', 'Nome_MS', 
-        'Quantidade_CD', 'Quantidade_MS', 'Diff_Quantidade',
-        'MarketValue_CD', 'MarketValue_MS', 'Diff_MarketValue',"Classe"]
-    all_matches = all_matches[col_order]
+# Ordenação final
+col_order = [
+    'TickerBase', 'Ticker_MS', 'Ticker_CD', 'CUSIP_MS', 'Descrição_CD', 'Nome_MS',
+    'Quantidade_CD', 'Quantidade_MS', 'Diff_Quantidade',
+    'MarketValue_CD', 'MarketValue_MS', 'Diff_MarketValue', 'Pct_Diff_MarketValue', "Classe"
+]
+all_matches = all_matches[col_order]
 
-# Exportar Excel
+# Exporta para Excel
 wb = Workbook()
 wb.remove(wb.active)
 
@@ -227,10 +335,21 @@ for r in dataframe_to_rows(non_matched_at, index=False, header=True):
     ws_so_at.append(r)
 
 if not all_matches.empty:
-    diff_market_value_col = col_order.index('Diff_MarketValue') + 1
-    for idx, row in enumerate(ws_pareados.iter_rows(min_row=2, max_row=ws_pareados.max_row), 2):
-        diff_value = ws_pareados.cell(row=idx, column=diff_market_value_col).value
-        if diff_value is not None and abs(diff_value) > 1:
+    diff_mv_col = col_order.index('Diff_MarketValue') + 1
+    pct_diff_mv_col = all_matches.columns.get_loc('Pct_Diff_MarketValue') + 1
+    classe_col = all_matches.columns.get_loc('Classe') + 1
+
+    for idx, row in enumerate(ws_pareados.iter_rows(min_row=2, max_row=ws_pareados.max_row), start=2):
+        diff_mv = ws_pareados.cell(row=idx, column=diff_mv_col).value
+        pct_diff_mv = ws_pareados.cell(row=idx, column=pct_diff_mv_col).value
+        classe = ws_pareados.cell(row=idx, column=classe_col).value
+
+        if classe == "EQUITY":
+            destacar = diff_mv is not None and abs(diff_mv) > 1
+        else:
+            destacar = pct_diff_mv is not None and abs(pct_diff_mv) > 0.01
+
+        if destacar:
             for cell in row:
                 cell.fill = YELLOW_FILL
 

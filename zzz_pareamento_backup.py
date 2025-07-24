@@ -35,8 +35,8 @@ def processar_com_dinheiro(df):
     ].copy()
     df = df.rename(columns={
         'Ativo': 'Ticker',
-        'Saldo Bruto (quant) em 30/06/2025': 'Quantidade',
-        'Saldo Bruto em 30/06/2025': 'MarketValue'
+        'Quant.': 'Quantidade',
+        'Saldo Bruto': 'MarketValue'
     })
     df['TickerBase'] = df['ticker_cmd_puro'].str.split(':').str[-1].str.strip()
     return df[['Descrição', 'Ticker', 'TickerBase', 'Quantidade', 'MarketValue', 'Classe']]
@@ -51,9 +51,9 @@ def processar_ativos(df):
     return df[['Nome', 'Ticker', 'TickerBase', 'Quantidade', 'MarketValue','CUSIP']]
 
 # Leitura dos arquivos
-ativos_path = 'ativos_extraidos_corrigido_final.xlsx'
+ativos_path = 'dados_formatados.xlsx'
 cd_path = 'COMDINHEIRO.xlsx'
-df_cd = pd.read_excel(cd_path, sheet_name='COM DINHEIRO')
+df_cd = pd.read_excel(cd_path, sheet_name='comdinheiro')
 df_at = pd.read_excel(ativos_path, sheet_name='Ativos')
 
 equity_cd = processar_com_dinheiro(df_cd)

@@ -9,6 +9,12 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Analisador de Ativos", layout="centered")
 
 # ==== CABEÇALHO ====
+from PIL import Image
+logo_longview = Image.open("longview.png")
+def mostrar_header():
+    st.image(logo_longview, use_container_width=False, width=320)
+
+mostrar_header()
 st.markdown("## 🧾 Comparador de Ativos: PDF vs COMDINHEIRO")
 st.markdown(
     """

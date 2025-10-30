@@ -90,12 +90,7 @@ if st.button("🔍 Iniciar Comparação") and pdf_file and excel_file:
             else:
                 st.info("✅ Nenhuma divergência encontrada entre os dados.")
 
-            # 6) Mostrar SEMPRE os pareados (se conseguimos ler)
-            if pareados_df is not None and not pareados_df.empty:
-                st.markdown("### ✅ Ativos pareados (sempre mostrado)")
-                st.dataframe(pareados_df, use_container_width=True)
-            else:
-                st.warning("⚠ Relatório gerado não trouxe a aba 'Pareados' ou ela está vazia.")
+           
 
             # 6.1) Mostrar também as outras abas do relatório (se quiser inspecionar)
             if outras_abas:

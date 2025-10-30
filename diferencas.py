@@ -77,7 +77,6 @@ def checar_divergencias(df_at, df_cd):
 
     def processar_com_dinheiro(df):
         df = df[
-            (df['Carteira'].str.startswith('LA_', na=False)) &
             (df['Classe'].isin(['EQUITY', "FIXED INCOME","FLOATING INCOME"]))
         ].copy()
         df = df.rename(columns={'Ativo':'Ticker','Quant.':'Quantidade','Saldo Bruto':'MarketValue'})

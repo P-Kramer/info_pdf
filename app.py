@@ -52,19 +52,35 @@ if st.button("🔍 Iniciar Comparação") and pdf_file and excel_file:
             # 2) Lê Excel COMDINHEIRO
             df_cd = pd.read_excel(excel_file)
 
+            # MOSTRAR O QUE VEIO DO EXCEL
+            with st.expander("📊 Visualizar dados lidos do COMDINHEIRO (Excel)"):
+                st.dataframe(df_cd, use_container_width=True)
+                st.caption(f"Linhas: {len(df_cd)} | Colunas: {len(df_cd.columns)}")
+
             # 3) Compara os dados
             df_diferencas, report_buffer = checar_divergencias(df_ativos, df_cd)
 
             # 4) Sempre tentar mostrar os PAREADOS a partir do relatório
             pareados_df = None
+            outras_abas = {}
             try:
                 report_buffer.seek(0)
                 xls = pd.ExcelFile(report_buffer)
-                if "Pareados" in xls.sheet_names:
+                # guarda todas as abas
+                sheet_names = xls.sheet_names
+
+                if "Pareados" in sheet_names:
                     pareados_df = pd.read_excel(xls, sheet_name="Pareados")
+
+                # opcional: guardar outras
+                for sh in sheet_names:
+                    if sh != "Pareados":
+                        outras_abas[sh] = pd.read_excel(xls, sheet_name=sh)
+
             except Exception as err:
-                st.warning("⚠ Não foi possível ler a aba 'Pareados' do relatório gerado. Verifique o checar_divergencias().")
+                st.warning("⚠ Não foi possível ler o relatório gerado (aba(s) do Excel). Verifique o checar_divergencias().")
                 pareados_df = None
+                outras_abas = {}
 
             # 5) Mostrar divergências (se houver)
             if not df_diferencas.empty:
@@ -81,7 +97,14 @@ if st.button("🔍 Iniciar Comparação") and pdf_file and excel_file:
             else:
                 st.warning("⚠ Relatório gerado não trouxe a aba 'Pareados' ou ela está vazia.")
 
-            # 7) Botão de download SEMPRE, porque o cara pode querer ver as outras abas
+            # 6.1) Mostrar também as outras abas do relatório (se quiser inspecionar)
+            if outras_abas:
+                with st.expander("📁 Outras abas do relatório gerado"):
+                    for nome, df_tab in outras_abas.items():
+                        st.markdown(f"**Aba: {nome}**")
+                        st.dataframe(df_tab, use_container_width=True)
+
+            # 7) Botão de download SEMPRE
             st.download_button(
                 label="📥 Baixar Relatório em Excel",
                 data=report_buffer.getvalue(),
